@@ -16,20 +16,24 @@ with bluetooth devices. In order to use this API in Electron, developers will
 need to handle the [`select-bluetooth-device` event on the webContents](../api/web-contents.md#event-select-bluetooth-device)
 associated with the device request.
 
+Additionally, [`ses.setBluetoothPairingHandler(handler)`](../api/session.md#sessetbluetoothpairinghandlerhandler-windows-linux)
+can be used to handle pairing to bluetooth devices on Windows or Linux when
+additional validation such as a pin is needed.
+
 ### Example
 
 This example demonstrates an Electron application that automatically selects
 the first available bluetooth device when the `Test Bluetooth` button is
 clicked.
 
-```javascript fiddle='docs/fiddles/features/web-bluetooth'
+```fiddle docs/fiddles/features/web-bluetooth
 
 ```
 
 ## WebHID API
 
 The [WebHID API](https://web.dev/hid/) can be used to access HID devices such
-as keyboards and gamepads.  Electron provides several APIs for working with
+as keyboards and gamepads. Electron provides several APIs for working with
 the WebHID API:
 
 * The [`select-hid-device` event on the Session](../api/session.md#event-select-hid-device)
@@ -57,7 +61,7 @@ By default Electron employs the same [blocklist](https://github.com/WICG/webhid/
 used by Chromium.  If you wish to override this behavior, you can do so by
 setting the `disable-hid-blocklist` flag:
 
-```javascript
+```js
 app.commandLine.appendSwitch('disable-hid-blocklist')
 ```
 
@@ -68,7 +72,7 @@ HID devices through [`ses.setDevicePermissionHandler(handler)`](../api/session.m
 and through [`select-hid-device` event on the Session](../api/session.md#event-select-hid-device)
 when the `Test WebHID` button is clicked.
 
-```javascript fiddle='docs/fiddles/features/web-hid'
+```fiddle docs/fiddles/features/web-hid
 
 ```
 
@@ -108,6 +112,46 @@ as well as demonstrating selecting the first available Arduino Uno serial device
 [`select-serial-port` event on the Session](../api/session.md#event-select-serial-port)
 when the `Test Web Serial` button is clicked.
 
-```javascript fiddle='docs/fiddles/features/web-serial'
+```fiddle docs/fiddles/features/web-serial
+
+```
+
+## WebUSB API
+
+The [WebUSB API](https://web.dev/usb/) can be used to access USB devices.
+Electron provides several APIs for working with the WebUSB API:
+
+* The [`select-usb-device` event on the Session](../api/session.md#event-select-usb-device)
+  can be used to select a USB device when a call to
+  `navigator.usb.requestDevice` is made.  Additionally the [`usb-device-added`](../api/session.md#event-usb-device-added)
+  and [`usb-device-removed`](../api/session.md#event-usb-device-removed) events
+  on the Session can be used to handle devices being plugged in or unplugged
+  when handling the `select-usb-device` event.
+  **Note:** These two events only fire until the callback from `select-usb-device`
+  is called.  They are not intended to be used as a generic usb device listener.
+* The [`usb-device-revoked` event on the Session](../api/session.md#event-usb-device-revoked) can
+  be used to respond when [device.forget()](https://developer.chrome.com/articles/usb/#revoke-access)
+  is called on a USB device.
+* [`ses.setDevicePermissionHandler(handler)`](../api/session.md#sessetdevicepermissionhandlerhandler)
+  can be used to provide default permissioning to devices without first calling
+  for permission to devices via `navigator.usb.requestDevice`.  Additionally,
+  the default behavior of Electron is to store granted device permission through
+  the lifetime of the corresponding WebContents.  If longer term storage is
+  needed, a developer can store granted device permissions (eg when handling
+  the `select-usb-device` event) and then read from that storage with
+  `setDevicePermissionHandler`.
+* [`ses.setPermissionCheckHandler(handler)`](../api/session.md#sessetpermissioncheckhandlerhandler)
+  can be used to disable USB access for specific origins.
+* [`ses.setUSBProtectedClassesHandler](../api/session.md#sessetusbprotectedclasseshandlerhandler)
+  can be used to allow usage of [protected USB classes](https://wicg.github.io/webusb/#usbinterface-interface) that are not available by default.
+
+### Example
+
+This example demonstrates an Electron application that automatically selects
+USB devices (if they are attached) through [`ses.setDevicePermissionHandler(handler)`](../api/session.md#sessetdevicepermissionhandlerhandler)
+and through [`select-usb-device` event on the Session](../api/session.md#event-select-usb-device)
+when the `Test WebUSB` button is clicked.
+
+```fiddle docs/fiddles/features/web-usb
 
 ```
