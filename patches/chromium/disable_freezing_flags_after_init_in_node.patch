@@ -15,16 +15,16 @@ at some point be an API to "unfreeze" the flags, or we may be able to refactor
 node initialization to not update flags after V8 initialization.
 
 diff --git a/content/renderer/render_process_impl.cc b/content/renderer/render_process_impl.cc
-index 02b4f803369202a81f2d54f3b35aef04be13dfa2..76dd21fc8e97c1a2836ae5a5a11b56334a656fe2 100644
+index eb11068e932b7b94cbf215d6f84ae427ce77fcd5..9744e45974af215bfbe9e5feb2db7274f8efebf0 100644
 --- a/content/renderer/render_process_impl.cc
 +++ b/content/renderer/render_process_impl.cc
-@@ -222,7 +222,8 @@ RenderProcessImpl::RenderProcessImpl()
-   SetV8FlagIfNotFeature(features::kWebAssemblyDynamicTiering,
-                         "--no-wasm-dynamic-tiering");
+@@ -208,6 +208,9 @@ RenderProcessImpl::RenderProcessImpl()
+     v8::V8::SetFlagsFromString(kSABPerContextFlag, sizeof(kSABPerContextFlag));
+   }
  
--  v8::V8::SetFlagsFromString("--freeze-flags-after-init");
-+  // This conflicts with node in the renderer.
-+  //v8::V8::SetFlagsFromString("--freeze-flags-after-init");
- 
- #if (BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)) && defined(ARCH_CPU_X86_64)
++  // Freezing flags after init conflicts with node in the renderer.
++  v8::V8::SetFlagsFromString("--no-freeze-flags-after-init");
++
    if (base::FeatureList::IsEnabled(features::kWebAssemblyTrapHandler)) {
+     content::GetContentClient()->renderer()->SetUpWebAssemblyTrapHandler();
+   }
