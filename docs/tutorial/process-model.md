@@ -28,7 +28,7 @@ it also meant that one website crashing or hanging would affect the entire brows
 To solve this problem, the Chrome team decided that each tab would render in its own
 process, limiting the harm that buggy or malicious code on a web page could cause to
 the app as a whole. A single browser process then controls these processes, as well
-as the application lifecycle as a whole. This diagram below from the [Chrome Comic]
+as the application lifecycle as a whole. This diagram below from the [Chrome Comic][]
 visualizes this model:
 
 ![Chrome's multi-process architecture](../images/chrome-processes.png)
@@ -83,10 +83,10 @@ terminated as well.
 
 The main process also controls your application's lifecycle through Electron's
 [`app`][app] module. This module provides a large set of events and methods
-that you can use to add custom application behaviour (for instance, programmatically
+that you can use to add custom application behavior (for instance, programmatically
 quitting your application, modifying the application dock, or showing an About panel).
 
-As a practical example, the app shown in the [quick start guide][quick-start-lifecycle]
+As a practical example, the app shown in the [tutorial starter code][tutorial-lifecycle]
 uses `app` APIs to create a more native application window experience.
 
 ```js title='main.js'
@@ -97,7 +97,7 @@ app.on('window-all-closed', () => {
 ```
 
 [app]: ../api/app.md
-[quick-start-lifecycle]: ../tutorial/quick-start.md#manage-your-windows-lifecycle
+[tutorial-lifecycle]: ../tutorial/tutorial-2-first-app.md#quit-the-app-when-all-windows-are-closed-windows--linux
 
 ### Native APIs
 
@@ -158,13 +158,13 @@ A preload script can be attached to the main process in the `BrowserWindow` cons
 
 ```js title='main.js'
 const { BrowserWindow } = require('electron')
-//...
+// ...
 const win = new BrowserWindow({
   webPreferences: {
-    preload: 'path/to/preload.js',
-  },
+    preload: 'path/to/preload.js'
+  }
 })
-//...
+// ...
 ```
 
 Because the preload script shares a global [`Window`][window-mdn] interface with the
@@ -175,13 +175,13 @@ Although preload scripts share a `window` global with the renderer they're attac
 you cannot directly attach any variables from the preload script to `window` because of
 the [`contextIsolation`][context-isolation] default.
 
-```js title='preload.js'
+```js title='preload.js' @ts-nocheck
 window.myAPI = {
-  desktop: true,
+  desktop: true
 }
 ```
 
-```js title='renderer.js'
+```js title='renderer.js' @ts-nocheck
 console.log(window.myAPI)
 // => undefined
 ```
@@ -196,11 +196,11 @@ securely:
 const { contextBridge } = require('electron')
 
 contextBridge.exposeInMainWorld('myAPI', {
-  desktop: true,
+  desktop: true
 })
 ```
 
-```js title='renderer.js'
+```js title='renderer.js' @ts-nocheck
 console.log(window.myAPI)
 // => { desktop: true }
 ```
@@ -214,8 +214,41 @@ This feature is incredibly useful for two main purposes:
   URL, you can add custom properties onto the renderer's `window` global that can
   be used for desktop-only logic on the web client's side.
 
+## The utility process
+
+Each Electron app can spawn multiple child processes from the main process using
+the [UtilityProcess][] API. The utility process runs in a Node.js environment,
+meaning it has the ability to `require` modules and use all of Node.js APIs.
+The utility process can be used to host for example: untrusted services,
+CPU intensive tasks or crash prone components which would have previously
+been hosted in the main process or process spawned with Node.js [`child_process.fork`][] API.
+The primary difference between the utility process and process spawned by Node.js
+child_process module is that the utility process can establish a communication
+channel with a renderer process using [`MessagePort`][]s. An Electron app can
+always prefer the [UtilityProcess][] API over Node.js [`child_process.fork`][] API when
+there is need to fork a child process from the main process.
+
+## Process-specific module aliases (TypeScript)
+
+Electron's npm package also exports subpaths that contain a subset of
+Electron's TypeScript type definitions.
+
+- `electron/main` includes types for all main process modules.
+- `electron/renderer` includes types for all renderer process modules.
+- `electron/common` includes types for modules that can run in main and renderer processes.
+
+These aliases have no impact on runtime, but can be used for typechecking
+and autocomplete.
+
+```js title="Usage example"
+const { app } = require('electron/main')
+const { shell } = require('electron/common')
+```
+
 [window-mdn]: https://developer.mozilla.org/en-US/docs/Web/API/Window
+[`MessagePort`]: https://developer.mozilla.org/en-US/docs/Web/API/MessagePort
+[`child_process.fork`]: https://nodejs.org/dist/latest-v16.x/docs/api/child_process.html#child_processforkmodulepath-args-options
 [context-isolation]: ./context-isolation.md
 [context-bridge]: ../api/context-bridge.md
 [ipcrenderer]: ../api/ipc-renderer.md
-[tutorial]: ./tutorial-1-prerequisites.md
+[UtilityProcess]: ../api/utility-process.md

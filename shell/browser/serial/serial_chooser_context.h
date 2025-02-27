@@ -7,18 +7,18 @@
 
 #include <map>
 #include <set>
-#include <utility>
+#include <string_view>
 #include <vector>
 
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/unguessable_token.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "content/public/browser/serial_delegate.h"
-#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "services/device/public/mojom/serial.mojom-forward.h"
-#include "shell/browser/electron_browser_context.h"
 #include "third_party/blink/public/mojom/serial/serial.mojom.h"
 #include "url/gurl.h"
 #include "url/origin.h"
@@ -27,26 +27,39 @@ namespace base {
 class Value;
 }
 
+namespace mojo {
+template <typename T>
+class PendingRemote;
+}  // namespace mojo
+
 namespace electron {
 
-extern const char kHidVendorIdKey[];
-extern const char kHidProductIdKey[];
+class ElectronBrowserContext;
 
+inline constexpr std::string_view kPortNameKey = "name";
+inline constexpr std::string_view kTokenKey = "token";
+inline constexpr std::string_view kBluetoothDevicePathKey =
+    "bluetooth_device_path";
 #if BUILDFLAG(IS_WIN)
-extern const char kDeviceInstanceIdKey[];
+inline constexpr std::string_view kDeviceInstanceIdKey = "device_instance_id";
 #else
-extern const char kVendorIdKey[];
-extern const char kProductIdKey[];
-extern const char kSerialNumberKey[];
-#if BUILDFLAG(IS_MAC)
-extern const char kUsbDriverKey[];
-#endif  // BUILDFLAG(IS_MAC)
+inline constexpr std::string_view kVendorIdKey = "vendor_id";
+inline constexpr std::string_view kProductIdKey = "product_id";
+inline constexpr std::string_view kSerialNumberKey = "serial_number";
 #endif  // BUILDFLAG(IS_WIN)
+#if BUILDFLAG(IS_MAC)
+inline constexpr std::string_view kUsbDriverKey = "usb_driver";
+#endif  // BUILDFLAG(IS_MAC)
 
 class SerialChooserContext : public KeyedService,
                              public device::mojom::SerialPortManagerClient {
  public:
-  using PortObserver = content::SerialDelegate::Observer;
+  class PortObserver : public content::SerialDelegate::Observer {
+   public:
+    // Called when the SerialChooserContext is shutting down. Observers must
+    // remove themselves before returning.
+    virtual void OnSerialChooserContextShutdown() = 0;
+  };
 
   explicit SerialChooserContext(ElectronBrowserContext* context);
   ~SerialChooserContext() override;
@@ -55,9 +68,6 @@ class SerialChooserContext : public KeyedService,
   SerialChooserContext(const SerialChooserContext&) = delete;
   SerialChooserContext& operator=(const SerialChooserContext&) = delete;
 
-  // ObjectPermissionContextBase::PermissionObserver:
-  void OnPermissionRevoked(const url::Origin& origin);
-
   // Serial-specific interface for granting and checking permissions.
   void GrantPortPermission(const url::Origin& origin,
                            const device::mojom::SerialPortInfo& port,
@@ -65,8 +75,18 @@ class SerialChooserContext : public KeyedService,
   bool HasPortPermission(const url::Origin& origin,
                          const device::mojom::SerialPortInfo& port,
                          content::RenderFrameHost* render_frame_host);
+  void RevokePortPermissionWebInitiated(
+      const url::Origin& origin,
+      const base::UnguessableToken& token,
+      content::RenderFrameHost* render_frame_host);
   static bool CanStorePersistentEntry(
       const device::mojom::SerialPortInfo& port);
+
+  // Only call this if you're sure |port_info_| has been initialized
+  // before-hand. The returned raw pointer is owned by |port_info_| and will be
+  // destroyed when the port is removed.
+  const device::mojom::SerialPortInfo* GetPortInfo(
+      const base::UnguessableToken& token);
 
   device::mojom::SerialPortManager* GetPortManager();
 
@@ -75,36 +95,32 @@ class SerialChooserContext : public KeyedService,
 
   base::WeakPtr<SerialChooserContext> AsWeakPtr();
 
-  bool is_initialized_ = false;
-
-  // Map from port token to port info.
-  std::map<base::UnguessableToken, device::mojom::SerialPortInfoPtr> port_info_;
-
   // SerialPortManagerClient implementation.
   void OnPortAdded(device::mojom::SerialPortInfoPtr port) override;
   void OnPortRemoved(device::mojom::SerialPortInfoPtr port) override;
-  void RevokePortPermissionWebInitiated(const url::Origin& origin,
-                                        const base::UnguessableToken& token);
-  // Only call this if you're sure |port_info_| has been initialized
-  // before-hand. The returned raw pointer is owned by |port_info_| and will be
-  // destroyed when the port is removed.
-  const device::mojom::SerialPortInfo* GetPortInfo(
-      const base::UnguessableToken& token);
+  void OnPortConnectedStateChanged(
+      device::mojom::SerialPortInfoPtr port) override {}
 
  private:
   void EnsurePortManagerConnection();
   void SetUpPortManagerConnection(
       mojo::PendingRemote<device::mojom::SerialPortManager> manager);
+  void OnGetDevices(std::vector<device::mojom::SerialPortInfoPtr> ports);
   void OnPortManagerConnectionError();
-  void RevokeObjectPermissionInternal(const url::Origin& origin,
-                                      const base::Value& object,
-                                      bool revoked_by_website);
+
+  bool is_initialized_ = false;
+
+  // Tracks the set of ports to which an origin has access to.
+  std::map<url::Origin, std::set<base::UnguessableToken>> ephemeral_ports_;
+
+  // Map from port token to port info.
+  std::map<base::UnguessableToken, device::mojom::SerialPortInfoPtr> port_info_;
 
   mojo::Remote<device::mojom::SerialPortManager> port_manager_;
   mojo::Receiver<device::mojom::SerialPortManagerClient> client_receiver_{this};
   base::ObserverList<PortObserver> port_observer_list_;
 
-  ElectronBrowserContext* browser_context_;
+  raw_ptr<ElectronBrowserContext> browser_context_;
 
   base::WeakPtrFactory<SerialChooserContext> weak_factory_{this};
 };

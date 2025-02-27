@@ -29,12 +29,15 @@ ElectronSerialDelegate::~ElectronSerialDelegate() = default;
 std::unique_ptr<content::SerialChooser> ElectronSerialDelegate::RunChooser(
     content::RenderFrameHost* frame,
     std::vector<blink::mojom::SerialPortFilterPtr> filters,
+    std::vector<device::BluetoothUUID> allowed_bluetooth_service_class_ids,
     content::SerialChooser::Callback callback) {
   SerialChooserController* controller = ControllerForFrame(frame);
   if (controller) {
     DeleteControllerForFrame(frame);
   }
-  AddControllerForFrame(frame, std::move(filters), std::move(callback));
+  AddControllerForFrame(frame, std::move(filters),
+                        std::move(allowed_bluetooth_service_class_ids),
+                        std::move(callback));
 
   // Return a nullptr because the return value isn't used for anything, eg
   // there is no mechanism to cancel navigator.serial.requestPort(). The return
@@ -56,12 +59,24 @@ bool ElectronSerialDelegate::HasPortPermission(
     content::RenderFrameHost* frame,
     const device::mojom::SerialPortInfo& port) {
   auto* web_contents = content::WebContents::FromRenderFrameHost(frame);
-  auto* browser_context = web_contents->GetBrowserContext();
-  auto* chooser_context =
-      SerialChooserContextFactory::GetForBrowserContext(browser_context);
-  return chooser_context->HasPortPermission(
+  return GetChooserContext(frame)->HasPortPermission(
       web_contents->GetPrimaryMainFrame()->GetLastCommittedOrigin(), port,
       frame);
+}
+
+void ElectronSerialDelegate::RevokePortPermissionWebInitiated(
+    content::RenderFrameHost* frame,
+    const base::UnguessableToken& token) {
+  auto* web_contents = content::WebContents::FromRenderFrameHost(frame);
+  return GetChooserContext(frame)->RevokePortPermissionWebInitiated(
+      web_contents->GetPrimaryMainFrame()->GetLastCommittedOrigin(), token,
+      frame);
+}
+
+const device::mojom::SerialPortInfo* ElectronSerialDelegate::GetPortInfo(
+    content::RenderFrameHost* frame,
+    const base::UnguessableToken& token) {
+  return GetChooserContext(frame)->GetPortInfo(token);
 }
 
 device::mojom::SerialPortManager* ElectronSerialDelegate::GetPortManager(
@@ -69,30 +84,19 @@ device::mojom::SerialPortManager* ElectronSerialDelegate::GetPortManager(
   return GetChooserContext(frame)->GetPortManager();
 }
 
-void ElectronSerialDelegate::AddObserver(content::RenderFrameHost* frame,
-                                         Observer* observer) {
-  return GetChooserContext(frame)->AddPortObserver(observer);
-}
-
-void ElectronSerialDelegate::RemoveObserver(content::RenderFrameHost* frame,
-                                            Observer* observer) {
-  SerialChooserContext* serial_chooser_context = GetChooserContext(frame);
-  if (serial_chooser_context) {
-    return serial_chooser_context->RemovePortObserver(observer);
-  }
-}
-
-void ElectronSerialDelegate::RevokePortPermissionWebInitiated(
+void ElectronSerialDelegate::AddObserver(
     content::RenderFrameHost* frame,
-    const base::UnguessableToken& token) {
-  // TODO(nornagon/jkleinsc): pass this on to the chooser context
+    content::SerialDelegate::Observer* observer) {
+  observer_list_.AddObserver(observer);
+  auto* chooser_context = GetChooserContext(frame);
+  if (!port_observation_.IsObserving())
+    port_observation_.Observe(chooser_context);
 }
 
-const device::mojom::SerialPortInfo* ElectronSerialDelegate::GetPortInfo(
+void ElectronSerialDelegate::RemoveObserver(
     content::RenderFrameHost* frame,
-    const base::UnguessableToken& token) {
-  // TODO(nornagon/jkleinsc): pass this on to the chooser context
-  return nullptr;
+    content::SerialDelegate::Observer* observer) {
+  observer_list_.RemoveObserver(observer);
 }
 
 SerialChooserController* ElectronSerialDelegate::ControllerForFrame(
@@ -104,12 +108,14 @@ SerialChooserController* ElectronSerialDelegate::ControllerForFrame(
 SerialChooserController* ElectronSerialDelegate::AddControllerForFrame(
     content::RenderFrameHost* render_frame_host,
     std::vector<blink::mojom::SerialPortFilterPtr> filters,
+    std::vector<device::BluetoothUUID> allowed_bluetooth_service_class_ids,
     content::SerialChooser::Callback callback) {
   auto* web_contents =
       content::WebContents::FromRenderFrameHost(render_frame_host);
   auto controller = std::make_unique<SerialChooserController>(
-      render_frame_host, std::move(filters), std::move(callback), web_contents,
-      weak_factory_.GetWeakPtr());
+      render_frame_host, std::move(filters),
+      std::move(allowed_bluetooth_service_class_ids), std::move(callback),
+      web_contents, weak_factory_.GetWeakPtr());
   controller_map_.insert(
       std::make_pair(render_frame_host, std::move(controller)));
   return ControllerForFrame(render_frame_host);
@@ -118,6 +124,29 @@ SerialChooserController* ElectronSerialDelegate::AddControllerForFrame(
 void ElectronSerialDelegate::DeleteControllerForFrame(
     content::RenderFrameHost* render_frame_host) {
   controller_map_.erase(render_frame_host);
+}
+
+// SerialChooserContext::PortObserver:
+void ElectronSerialDelegate::OnPortAdded(
+    const device::mojom::SerialPortInfo& port) {
+  for (auto& observer : observer_list_)
+    observer.OnPortAdded(port);
+}
+
+void ElectronSerialDelegate::OnPortRemoved(
+    const device::mojom::SerialPortInfo& port) {
+  for (auto& observer : observer_list_)
+    observer.OnPortRemoved(port);
+}
+
+void ElectronSerialDelegate::OnPortManagerConnectionError() {
+  port_observation_.Reset();
+  for (auto& observer : observer_list_)
+    observer.OnPortManagerConnectionError();
+}
+
+void ElectronSerialDelegate::OnSerialChooserContextShutdown() {
+  port_observation_.Reset();
 }
 
 }  // namespace electron

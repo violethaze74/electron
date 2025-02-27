@@ -10,6 +10,8 @@
 #include "base/memory/weak_ptr.h"
 #include "base/no_destructor.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/task/sequenced_task_runner.h"
+#include "gin/handle.h"
 #include "mojo/public/cpp/system/data_pipe.h"
 #include "mojo/public/cpp/system/simple_watcher.h"
 #include "net/base/net_errors.h"
@@ -40,7 +42,7 @@ class DataPipeReader {
         data_pipe_getter_(std::move(data_pipe_getter)),
         handle_watcher_(FROM_HERE,
                         mojo::SimpleWatcher::ArmingPolicy::MANUAL,
-                        base::SequencedTaskRunnerHandle::Get()) {
+                        base::SequencedTaskRunner::GetCurrentDefault()) {
     // Get a new data pipe and start.
     mojo::ScopedDataPipeProducerHandle producer_handle;
     CHECK_EQ(mojo::CreateDataPipe(nullptr, producer_handle, data_pipe_),
@@ -67,7 +69,7 @@ class DataPipeReader {
       return;
     }
     buffer_.resize(size);
-    head_ = &buffer_.front();
+    head_offset_ = 0;
     remaining_size_ = size;
     handle_watcher_.ArmOrNotify();
   }
@@ -81,13 +83,19 @@ class DataPipeReader {
     }
 
     // Read.
-    uint32_t length = remaining_size_;
-    result = data_pipe_->ReadData(head_, &length, MOJO_READ_DATA_FLAG_NONE);
+    size_t length = remaining_size_;
+    result = data_pipe_->ReadData(
+        MOJO_READ_DATA_FLAG_NONE,
+        base::as_writable_byte_span(buffer_).subspan(head_offset_, length),
+        length);
     if (result == MOJO_RESULT_OK) {  // success
       remaining_size_ -= length;
-      head_ += length;
-      if (remaining_size_ == 0)
+      head_offset_ += length;
+      if (remaining_size_ == 0) {
         OnSuccess();
+      } else {
+        handle_watcher_.ArmOrNotify();
+      }
     } else if (result == MOJO_RESULT_SHOULD_WAIT) {  // IO pending
       handle_watcher_.ArmOrNotify();
     } else {  // error
@@ -125,7 +133,7 @@ class DataPipeReader {
   std::vector<char> buffer_;
 
   // The head of buffer.
-  char* head_ = nullptr;
+  size_t head_offset_ = 0;
 
   // Remaining data to read.
   uint64_t remaining_size_ = 0;
@@ -157,6 +165,10 @@ v8::Local<v8::Promise> DataPipeHolder::ReadAll(v8::Isolate* isolate) {
   return handle;
 }
 
+const char* DataPipeHolder::GetTypeName() {
+  return "DataPipeHolder";
+}
+
 // static
 gin::Handle<DataPipeHolder> DataPipeHolder::Create(
     v8::Isolate* isolate,
@@ -176,7 +188,7 @@ gin::Handle<DataPipeHolder> DataPipeHolder::From(v8::Isolate* isolate,
     if (gin::ConvertFromV8(isolate, object.ToLocalChecked(), &handle))
       return handle;
   }
-  return gin::Handle<DataPipeHolder>();
+  return {};
 }
 
 }  // namespace electron::api
